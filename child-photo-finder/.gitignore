@@ -1,0 +1,24 @@
+# Environment variables
+.env
+
+# Google credentials
+credentials/*.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+venv/
+
+# Temporary files
+data/temp/
+data/results/
+
+# Uploaded/test images
+data/uploads/
+
+# IDE
+.vscode/
+.idea/

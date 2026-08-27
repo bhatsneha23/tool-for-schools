@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+sqlalchemy
+psycopg2-binary
+pgvector
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+opencv-python
+insightface
+onnxruntime
+numpy
+python-multipart
+pillow
