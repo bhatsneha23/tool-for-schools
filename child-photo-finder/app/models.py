@@ -6,9 +6,47 @@ from sqlalchemy import (
     DateTime,
     JSON
 )
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    event_id = Column(
+        String,
+        unique=True,
+        nullable=False,
+        index=True
+    )
+
+    event_name = Column(
+        String,
+        nullable=False
+    )
+
+    drive_folder_id = Column(
+        String,
+        nullable=False
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    photos = relationship(
+        "Photo",
+        back_populates="event"
+    )
 
 
 class Photo(Base):
@@ -18,6 +56,12 @@ class Photo(Base):
         Integer,
         primary_key=True,
         index=True
+    )
+
+    event_id = Column(
+        Integer,
+        ForeignKey("events.id"),
+        nullable=True
     )
 
     drive_file_id = Column(
@@ -44,6 +88,17 @@ class Photo(Base):
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()
+    )
+
+    event = relationship(
+        "Event",
+        back_populates="photos"
+    )
+
+    embeddings = relationship(
+        "FaceEmbedding",
+        back_populates="photo",
+        cascade="all, delete-orphan"
     )
 
 
@@ -75,4 +130,9 @@ class FaceEmbedding(Base):
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()
+    )
+
+    photo = relationship(
+        "Photo",
+        back_populates="embeddings"
     )

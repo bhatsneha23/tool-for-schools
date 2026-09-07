@@ -1,6 +1,5 @@
 import argparse
 import html
-import os
 import webbrowser
 from pathlib import Path
 
@@ -13,7 +12,7 @@ RESULTS_DIR = Path("data/results")
 RESULTS_HTML = RESULTS_DIR / "results.html"
 
 
-def create_results_page(matches):
+def create_results_page(matches, event_name, event_id):
 
     RESULTS_DIR.mkdir(
         parents=True,
@@ -22,7 +21,7 @@ def create_results_page(matches):
 
     cards = []
 
-    for index, match in enumerate(matches, start=1):
+    for match in matches:
 
         file_name = html.escape(
             match["file_name"]
@@ -53,12 +52,14 @@ def create_results_page(matches):
 
     html_content = f"""
 <!DOCTYPE html>
+
 <html>
+
 <head>
 
 <meta charset="UTF-8">
 
-<title>Child Photo Finder - Results</title>
+<title>Child Photo Finder</title>
 
 <style>
 
@@ -69,22 +70,23 @@ body {{
     background: #f5f5f5;
 }}
 
-h1 {{
+.header {{
     text-align: center;
+    margin-bottom: 30px;
 }}
 
-.subtitle {{
-    text-align: center;
+.header h1 {{
+    margin-bottom: 8px;
+}}
+
+.event {{
     color: #666;
-    margin-bottom: 30px;
 }}
 
 .grid {{
     display: grid;
-    grid-template-columns: repeat(
-        auto-fill,
-        minmax(250px, 1fr)
-    );
+    grid-template-columns:
+        repeat(auto-fill, minmax(250px, 1fr));
     gap: 25px;
     max-width: 1200px;
     margin: auto;
@@ -117,16 +119,31 @@ h1 {{
     color: #555;
 }}
 
+.empty {{
+    text-align: center;
+    padding: 50px;
+    color: #666;
+}}
+
 </style>
 
 </head>
 
 <body>
 
+<div class="header">
+
 <h1>Child Photo Finder</h1>
 
-<div class="subtitle">
-    {len(matches)} matching photos found
+<div class="event">
+Event: {html.escape(event_name)}
+<br>
+Event ID: {html.escape(event_id)}
+<br>
+<br>
+{len(matches)} matching photos found
+</div>
+
 </div>
 
 <div class="grid">
@@ -136,6 +153,7 @@ h1 {{
 </div>
 
 </body>
+
 </html>
 """
 
@@ -156,9 +174,9 @@ def main():
     )
 
     parser.add_argument(
-        "--face-index",
-        type=int,
-        help="Index of the child's face when the image contains multiple faces"
+        "--event",
+        default="EVT001",
+        help="Event ID to search"
     )
 
     args = parser.parse_args()
@@ -179,10 +197,13 @@ def main():
     print("==============================")
 
     print(
-        f"\nTest image: {image_path}"
+        f"\nEvent ID: {args.event}"
     )
 
-    # Read test image
+    print(
+        f"Test image: {image_path}"
+    )
+
     image_bytes = image_path.read_bytes()
 
     db = SessionLocal()
@@ -195,23 +216,18 @@ def main():
 
         matches = matcher.find_matches(
             image_bytes,
-            face_index=args.face_index
+            event_id=args.event
         )
 
         print(
-            f"\nFound {len(matches)} matching photos."
+            f"\nFound {len(matches)} "
+            f"matching photos."
         )
 
         if not matches:
 
             print(
                 "\nNo matching photos found."
-            )
-
-            create_results_page([])
-
-            webbrowser.open(
-                RESULTS_HTML.resolve().as_uri()
             )
 
             return
@@ -221,7 +237,7 @@ def main():
             exist_ok=True
         )
 
-        # Download matched photos
+        # Download matching photos
         for index, match in enumerate(
             matches,
             start=1
@@ -256,11 +272,8 @@ def main():
                     file_data.read()
                 )
 
-                # HTML needs a relative path
                 match["local_file"] = (
-                    Path(
-                        safe_name
-                    ).as_posix()
+                    Path(safe_name).as_posix()
                 )
 
             except Exception as e:
@@ -272,24 +285,39 @@ def main():
 
                 match["local_file"] = None
 
-        # Generate results page
-        create_results_page(matches)
+        event_name = "Unknown Event"
+
+        event = matcher.get_event(
+            args.event
+        )
+
+        if event:
+            event_name = event.event_name
+
+        create_results_page(
+            matches,
+            event_name,
+            args.event
+        )
 
         print(
             "\n=============================="
         )
 
-        print(
-            "RESULTS READY"
-        )
+        print("RESULTS READY")
 
         print(
-            f"\nOpening:"
-            f"\n{RESULTS_HTML}"
+            f"\nOpening results..."
         )
 
         webbrowser.open(
             RESULTS_HTML.resolve().as_uri()
+        )
+
+    except ValueError as e:
+
+        print(
+            f"\nERROR: {e}"
         )
 
     finally:
