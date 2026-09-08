@@ -14,15 +14,27 @@ class IngestionService:
         self.db = db
         self.face_service = FaceService()
 
-    def ingest_folder(self, folder_id: str):
+    def _get_all_image_files(self, folder_id: str):
+        """Recursively find all image files inside a Drive folder."""
+        all_images = []
 
         files = list_files_in_folder(folder_id)
 
-        image_files = [
-            file
-            for file in files
-            if file["mimeType"].startswith("image/")
-        ]
+        for file in files:
+            mime_type = file["mimeType"]
+
+            if mime_type.startswith("image/"):
+                all_images.append(file)
+
+            elif mime_type == "application/vnd.google-apps.folder":
+                all_images.extend(
+                    self._get_all_image_files(file["id"])
+                )
+
+        return all_images
+
+    def ingest_folder(self, folder_id: str, event_id: int):
+        image_files = self._get_all_image_files(folder_id)
 
         print(f"Found {len(image_files)} images.")
 
@@ -65,6 +77,7 @@ class IngestionService:
 
                 # Store photo metadata
                 photo = Photo(
+                    event_id=event_id,
                     drive_file_id=file["id"],
                     file_name=file["name"],
                     mime_type=file["mimeType"],
@@ -76,7 +89,6 @@ class IngestionService:
 
                 # Store every detected face
                 for face in faces:
-
                     embedding = FaceEmbedding(
                         photo_id=photo.id,
                         face_index=face["face_index"],
@@ -91,7 +103,6 @@ class IngestionService:
                 total_faces += len(faces)
 
             except Exception as e:
-
                 self.db.rollback()
 
                 print(
