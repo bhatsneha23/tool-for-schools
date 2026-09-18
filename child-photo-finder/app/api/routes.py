@@ -212,7 +212,12 @@ def create_event(
         "event": {
             "event_id": event.event_id,
             "event_name": event.event_name,
-            "drive_folder_id": event.drive_folder_id
+            "drive_folder_id": event.drive_folder_id,
+            "drive_link": (
+                f"https://drive.google.com/drive/folders/"
+                f"{event.drive_folder_id}"
+            ),
+            "status": "Pending"
         }
     }
 
@@ -240,7 +245,18 @@ def get_events(
         "events": [
             {
                 "event_id": event.event_id,
-                "event_name": event.event_name
+                "event_name": event.event_name,
+                "drive_link": (
+                    f"https://drive.google.com/drive/folders/"
+                    f"{event.drive_folder_id}"
+                ),
+                "status": (
+                    "Ready"
+                    if db.query(Photo)
+                    .filter(Photo.event_id == event.id)
+                    .first()
+                    else "Pending"
+                )
             }
             for event in events
         ]
