@@ -7,6 +7,7 @@ from fastapi import (
     Header
 )
 
+from app.services.ingestion_service import IngestionService
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -203,12 +204,32 @@ def create_event(
             detail="Could not create event."
         )
 
+        # --------------------------------------------------------
     # --------------------------------------------------------
+    # Ingest Google Drive photos
+    # --------------------------------------------------------
+
+    try:
+        ingestion_service = IngestionService(db)
+
+        ingestion_service.ingest_folder(
+            folder_id=event.drive_folder_id,
+            event_id=event.id
+        )
+
+    except Exception as e:
+        print(f"Ingestion error: {e}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Event created, but photo ingestion failed."
+        )
+
     # Return created event
     # --------------------------------------------------------
 
     return {
-        "message": "Event created successfully.",
+        "message": "Event created and photos ingested successfully.",
         "event": {
             "event_id": event.event_id,
             "event_name": event.event_name,
@@ -217,7 +238,7 @@ def create_event(
                 f"https://drive.google.com/drive/folders/"
                 f"{event.drive_folder_id}"
             ),
-            "status": "Pending"
+            "status": "Ready"
         }
     }
 
