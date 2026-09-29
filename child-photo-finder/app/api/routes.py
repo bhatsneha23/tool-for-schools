@@ -187,7 +187,8 @@ def create_event(
     event = Event(
         event_id=event_id,
         event_name=event_name,
-        drive_folder_id=drive_folder_id
+        drive_folder_id=drive_folder_id,
+        status="Pending"
     )
 
     db.add(event)
@@ -204,7 +205,6 @@ def create_event(
             detail="Could not create event."
         )
 
-        # --------------------------------------------------------
     # --------------------------------------------------------
     # Ingest Google Drive photos
     # --------------------------------------------------------
@@ -217,19 +217,26 @@ def create_event(
             event_id=event.id
         )
 
+        # Refresh event so we get the latest status
+        db.refresh(event)
+
     except Exception as e:
         print(f"Ingestion error: {e}")
+
+        # Event status is set to Failed by ingestion_service
+        db.refresh(event)
 
         raise HTTPException(
             status_code=500,
             detail="Event created, but photo ingestion failed."
         )
 
+    # --------------------------------------------------------
     # Return created event
     # --------------------------------------------------------
 
     return {
-        "message": "Event created and photos ingested successfully.",
+        "message": "Event created and photo ingestion completed.",
         "event": {
             "event_id": event.event_id,
             "event_name": event.event_name,
@@ -238,7 +245,7 @@ def create_event(
                 f"https://drive.google.com/drive/folders/"
                 f"{event.drive_folder_id}"
             ),
-            "status": "Ready"
+            "status": event.status
         }
     }
 
@@ -271,13 +278,7 @@ def get_events(
                     f"https://drive.google.com/drive/folders/"
                     f"{event.drive_folder_id}"
                 ),
-                "status": (
-                    "Ready"
-                    if db.query(Photo)
-                    .filter(Photo.event_id == event.id)
-                    .first()
-                    else "Pending"
-                )
+                "status": event.status
             }
             for event in events
         ]

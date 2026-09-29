@@ -5,7 +5,7 @@ from app.drive.drive_service import (
     download_file
 )
 from app.face.face_service import FaceService
-from app.models import Photo, FaceEmbedding
+from app.models import Photo, FaceEmbedding, Event
 
 
 class IngestionService:
@@ -16,6 +16,7 @@ class IngestionService:
 
     def _get_all_image_files(self, folder_id: str):
         """Recursively find all image files inside a Drive folder."""
+
         all_images = []
 
         files = list_files_in_folder(folder_id)
@@ -34,85 +35,206 @@ class IngestionService:
         return all_images
 
     def ingest_folder(self, folder_id: str, event_id: int):
-        image_files = self._get_all_image_files(folder_id)
+        """
+        Ingest all images from a Google Drive folder.
 
-        print(f"Found {len(image_files)} images.")
+        Event status:
+        Pending -> Processing -> Ready
+        Processing -> Failed if ingestion encounters a critical error.
+        """
 
-        processed = 0
-        skipped = 0
-        total_faces = 0
+        # --------------------------------------------------------
+        # Get event
+        # --------------------------------------------------------
 
-        for index, file in enumerate(image_files, start=1):
+        event = (
+            self.db.query(Event)
+            .filter(Event.id == event_id)
+            .first()
+        )
 
-            print(
-                f"\n[{index}/{len(image_files)}] "
-                f"{file['name']}"
-            )
+        if event is None:
+            raise ValueError(f"Event with ID {event_id} not found.")
 
-            # Avoid processing the same Drive file twice
-            existing_photo = (
-                self.db.query(Photo)
-                .filter(
-                    Photo.drive_file_id == file["id"]
+        # --------------------------------------------------------
+        # Mark event as Processing
+        # --------------------------------------------------------
+
+        event.status = "Processing"
+        self.db.commit()
+
+        try:
+            # ----------------------------------------------------
+            # Find all images
+            # ----------------------------------------------------
+
+            image_files = self._get_all_image_files(folder_id)
+
+            print(f"Found {len(image_files)} images.")
+
+            processed = 0
+            skipped = 0
+            total_faces = 0
+            failed = 0
+
+            # ----------------------------------------------------
+            # Handle no photos
+            # ----------------------------------------------------
+
+            if len(image_files) == 0:
+                event.status = "Pending"
+                self.db.commit()
+
+                print("No images found. Event remains Pending.")
+
+                return {
+                    "processed": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "total_faces": 0,
+                    "status": "Pending"
+                }
+
+            # ----------------------------------------------------
+            # Process every image
+            # ----------------------------------------------------
+
+            for index, file in enumerate(image_files, start=1):
+
+                print(
+                    f"\n[{index}/{len(image_files)}] "
+                    f"{file['name']}"
                 )
+
+                # Avoid processing the same Drive file twice
+                existing_photo = (
+                    self.db.query(Photo)
+                    .filter(
+                        Photo.drive_file_id == file["id"]
+                    )
+                    .first()
+                )
+
+                if existing_photo:
+                    print("Already processed. Skipping.")
+                    skipped += 1
+                    continue
+
+                try:
+                    # --------------------------------------------
+                    # Download image
+                    # --------------------------------------------
+
+                    file_data = download_file(file["id"])
+                    image_bytes = file_data.read()
+
+                    # --------------------------------------------
+                    # Detect faces
+                    # --------------------------------------------
+
+                    faces = self.face_service.detect_faces(
+                        image_bytes
+                    )
+
+                    print(
+                        f"Faces detected: {len(faces)}"
+                    )
+
+                    # --------------------------------------------
+                    # Store photo metadata
+                    # --------------------------------------------
+
+                    photo = Photo(
+                        event_id=event_id,
+                        drive_file_id=file["id"],
+                        file_name=file["name"],
+                        mime_type=file["mimeType"],
+                        drive_url=file.get("webViewLink")
+                    )
+
+                    self.db.add(photo)
+                    self.db.flush()
+
+                    # --------------------------------------------
+                    # Store every detected face
+                    # --------------------------------------------
+
+                    for face in faces:
+
+                        embedding = FaceEmbedding(
+                            photo_id=photo.id,
+                            face_index=face["face_index"],
+                            embedding=face["embedding"]
+                        )
+
+                        self.db.add(embedding)
+
+                    self.db.commit()
+
+                    processed += 1
+                    total_faces += len(faces)
+
+                except Exception as e:
+
+                    self.db.rollback()
+
+                    failed += 1
+
+                    print(
+                        f"ERROR processing "
+                        f"{file['name']}: {e}"
+                    )
+
+            # ----------------------------------------------------
+            # Determine final event status
+            # ----------------------------------------------------
+
+            if failed > 0:
+                event.status = "Failed"
+            else:
+                event.status = "Ready"
+
+            self.db.commit()
+
+            # ----------------------------------------------------
+            # Ingestion summary
+            # ----------------------------------------------------
+
+            print("\n==============================")
+            print("INGESTION COMPLETE")
+            print("==============================")
+            print(f"Processed : {processed}")
+            print(f"Skipped   : {skipped}")
+            print(f"Failed    : {failed}")
+            print(f"Faces     : {total_faces}")
+            print(f"Status    : {event.status}")
+
+            return {
+                "processed": processed,
+                "skipped": skipped,
+                "failed": failed,
+                "total_faces": total_faces,
+                "status": event.status
+            }
+
+        except Exception as e:
+
+            # ----------------------------------------------------
+            # Critical ingestion failure
+            # ----------------------------------------------------
+
+            self.db.rollback()
+
+            event = (
+                self.db.query(Event)
+                .filter(Event.id == event_id)
                 .first()
             )
 
-            if existing_photo:
-                print("Already processed. Skipping.")
-                skipped += 1
-                continue
-
-            try:
-                file_data = download_file(file["id"])
-                image_bytes = file_data.read()
-
-                faces = self.face_service.detect_faces(
-                    image_bytes
-                )
-
-                print(
-                    f"Faces detected: {len(faces)}"
-                )
-
-                # Store photo metadata
-                photo = Photo(
-                    event_id=event_id,
-                    drive_file_id=file["id"],
-                    file_name=file["name"],
-                    mime_type=file["mimeType"],
-                    drive_url=file.get("webViewLink")
-                )
-
-                self.db.add(photo)
-                self.db.flush()
-
-                # Store every detected face
-                for face in faces:
-                    embedding = FaceEmbedding(
-                        photo_id=photo.id,
-                        face_index=face["face_index"],
-                        embedding=face["embedding"]
-                    )
-
-                    self.db.add(embedding)
-
+            if event:
+                event.status = "Failed"
                 self.db.commit()
 
-                processed += 1
-                total_faces += len(faces)
+            print(f"Critical ingestion error: {e}")
 
-            except Exception as e:
-                self.db.rollback()
-
-                print(
-                    f"ERROR processing "
-                    f"{file['name']}: {e}"
-                )
-
-        print("\n==============================")
-        print("INGESTION COMPLETE")
-        print("==============================")
-        print(f"Processed : {processed}")
-        print(f"Skipped   : {skipped}")
-        print(f"Faces     : {total_faces}")
+            raise

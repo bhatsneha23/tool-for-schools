@@ -8,7 +8,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
 from app.database import Base
 
 
@@ -36,6 +35,12 @@ class Event(Base):
     drive_folder_id = Column(
         String,
         nullable=False
+    )
+
+    status = Column(
+        String,
+        nullable=False,
+        default="Pending"
     )
 
     created_at = Column(
