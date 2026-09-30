@@ -6,21 +6,25 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+import requests
 
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly"
 ]
 
+
 BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")
 )
+
 
 CREDENTIALS_FILE = os.path.join(
     BASE_DIR,
     "credentials",
     "google_credentials.json"
 )
+
 
 TOKEN_FILE = os.path.join(
     BASE_DIR,
@@ -73,14 +77,16 @@ def list_files_in_folder(folder_id):
     )
 
     results = []
-
     page_token = None
 
     while True:
         response = service.files().list(
             q=query,
             spaces="drive",
-            fields="nextPageToken, files(id, name, mimeType, webViewLink)",
+            fields=(
+                "nextPageToken, "
+                "files(id, name, mimeType, webViewLink, thumbnailLink)"
+            ),
             pageToken=page_token
         ).execute()
 
@@ -97,6 +103,10 @@ def list_files_in_folder(folder_id):
 
 
 def download_file(file_id):
+    """
+    Download the original full-quality file from Google Drive.
+    """
+
     service = get_drive_service()
 
     request = service.files().get_media(
@@ -118,3 +128,71 @@ def download_file(file_id):
     file_data.seek(0)
 
     return file_data
+
+
+def get_thumbnail_link(file_id):
+    """
+    Get the temporary Google Drive thumbnail URL
+    for a file.
+    """
+
+    service = get_drive_service()
+
+    response = service.files().get(
+        fileId=file_id,
+        fields="id, mimeType, thumbnailLink"
+    ).execute()
+
+    return response.get("thumbnailLink")
+
+
+def download_thumbnail(file_id):
+    """
+    Download the thumbnail from Google Drive using
+    the authenticated Google credentials.
+
+    Returns:
+        BytesIO containing the thumbnail image.
+    """
+
+    thumbnail_link = get_thumbnail_link(file_id)
+
+    if not thumbnail_link:
+        return None
+
+    credentials = None
+
+    if os.path.exists(TOKEN_FILE):
+        credentials = Credentials.from_authorized_user_file(
+            TOKEN_FILE,
+            SCOPES
+        )
+
+    if credentials and credentials.expired and credentials.refresh_token:
+        credentials.refresh(Request())
+
+    if not credentials or not credentials.valid:
+        get_drive_service()
+
+        credentials = Credentials.from_authorized_user_file(
+            TOKEN_FILE,
+            SCOPES
+        )
+
+    response = requests.get(
+        thumbnail_link,
+        headers={
+            "Authorization": f"Bearer {credentials.token}"
+        },
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    thumbnail_data = io.BytesIO(
+        response.content
+    )
+
+    thumbnail_data.seek(0)
+
+    return thumbnail_data

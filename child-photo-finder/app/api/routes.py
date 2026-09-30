@@ -13,7 +13,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from io import BytesIO
 
-from app.drive.drive_service import download_file
+from app.drive.drive_service import (
+    download_file,
+    download_thumbnail
+)
+
 from app.database import get_db
 from app.models import Event, Photo
 from app.services.matching_service import MatchingService
@@ -327,7 +331,16 @@ def get_event_photos(
             {
                 "photo_id": photo.id,
                 "file_name": photo.file_name,
-                "image_url": f"/api/photos/{photo.id}/image"
+
+                # Full-quality image
+                "image_url": (
+                    f"/api/photos/{photo.id}/image"
+                ),
+
+                # Thumbnail image
+                "thumbnail_url": (
+                    f"/api/photos/{photo.id}/thumbnail"
+                )
             }
             for photo in photos
         ]
@@ -432,8 +445,15 @@ async def search_child(
                 "photo_id": match["photo_id"],
                 "file_name": match["file_name"],
                 "similarity": match["similarity"],
+
+                # Full-quality image
                 "image_url": (
                     f"/api/photos/{match['photo_id']}/image"
+                ),
+
+                # Thumbnail image
+                "thumbnail_url": (
+                    f"/api/photos/{match['photo_id']}/thumbnail"
                 )
             }
             for match in matches
@@ -487,4 +507,65 @@ def get_photo_image(
         raise HTTPException(
             status_code=500,
             detail="Could not retrieve photo."
+        )
+
+
+# ============================================================
+# GET PHOTO THUMBNAIL
+# ============================================================
+
+@router.get("/photos/{photo_id}/thumbnail")
+def get_photo_thumbnail(
+    photo_id: int,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_api_key)
+):
+    """
+    Retrieve a thumbnail version of a photo from Google Drive.
+
+    The original full-quality image remains available through:
+    /api/photos/{photo_id}/image
+    """
+
+    photo = (
+        db.query(Photo)
+        .filter(Photo.id == photo_id)
+        .first()
+    )
+
+    if photo is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Photo not found."
+        )
+
+    try:
+        thumbnail_data = download_thumbnail(
+            photo.drive_file_id
+        )
+
+        if thumbnail_data is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Thumbnail not available."
+            )
+
+        thumbnail_bytes = thumbnail_data.read()
+
+        return StreamingResponse(
+            BytesIO(thumbnail_bytes),
+            media_type="image/jpeg"
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(
+            f"Thumbnail download error: {e}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Could not retrieve photo thumbnail."
         )
