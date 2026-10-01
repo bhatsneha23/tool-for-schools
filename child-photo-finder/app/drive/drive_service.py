@@ -1,12 +1,14 @@
 import io
 import os
+import re
+
+import requests
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-import requests
 
 
 SCOPES = [
@@ -106,7 +108,6 @@ def download_file(file_id):
     """
     Download the original full-quality file from Google Drive.
     """
-
     service = get_drive_service()
 
     request = service.files().get_media(
@@ -133,9 +134,8 @@ def download_file(file_id):
 def get_thumbnail_link(file_id):
     """
     Get the temporary Google Drive thumbnail URL
-    for a file.
+    and request a larger thumbnail for better quality.
     """
-
     service = get_drive_service()
 
     response = service.files().get(
@@ -143,7 +143,25 @@ def get_thumbnail_link(file_id):
         fields="id, mimeType, thumbnailLink"
     ).execute()
 
-    return response.get("thumbnailLink")
+    thumbnail_link = response.get("thumbnailLink")
+
+    if not thumbnail_link:
+        return None
+
+    # Request a larger thumbnail.
+    # Google Drive thumbnail URLs commonly contain
+    # a size parameter such as =s220, =s400, etc.
+    if "=s" in thumbnail_link:
+        thumbnail_link = re.sub(
+            r"=s\d+",
+            "=s800",
+            thumbnail_link
+        )
+    else:
+        # Fallback if Google returns a URL without a size parameter.
+        thumbnail_link += "=s800"
+
+    return thumbnail_link
 
 
 def download_thumbnail(file_id):
@@ -154,7 +172,6 @@ def download_thumbnail(file_id):
     Returns:
         BytesIO containing the thumbnail image.
     """
-
     thumbnail_link = get_thumbnail_link(file_id)
 
     if not thumbnail_link:
