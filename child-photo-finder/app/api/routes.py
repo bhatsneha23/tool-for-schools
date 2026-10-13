@@ -9,7 +9,7 @@ from fastapi import (
 
 from app.services.ingestion_service import IngestionService
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel , Field
 from sqlalchemy.orm import Session
 from io import BytesIO
 
@@ -50,9 +50,12 @@ def verify_api_key(
 # EVENT CREATE REQUEST MODEL
 # ============================================================
 
+
 class EventCreate(BaseModel):
+    event_id: int = Field(gt = 0)
     event_name: str
     drive_link: str
+
 
 
 # ============================================================
@@ -125,6 +128,22 @@ def create_event(
             detail="Event name cannot be empty."
         )
 
+    
+    # Check duplicate MyClassAdmin event ID
+    existing_id = (
+        db.query(Event)
+        .filter(
+            Event.event_id == str(event_data.event_id)
+        )
+        .first()
+    )
+
+    if existing_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This event_id already exists."
+        )
+
     # --------------------------------------------------------
     # Check duplicate event name
     # --------------------------------------------------------
@@ -171,18 +190,7 @@ def create_event(
     # Generate next event ID
     # --------------------------------------------------------
 
-    last_event = (
-        db.query(Event)
-        .order_by(Event.id.desc())
-        .first()
-    )
-
-    if last_event:
-        next_number = last_event.id + 1
-    else:
-        next_number = 1
-
-    event_id = f"EVT{next_number:03d}"
+    event_id = str(event_data.event_id)
 
     # --------------------------------------------------------
     # Create event
