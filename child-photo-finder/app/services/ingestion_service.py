@@ -1,4 +1,6 @@
+
 import requests
+import time
 from sqlalchemy.orm import Session
 
 from app.drive.drive_service import (
@@ -20,7 +22,7 @@ class IngestionService:
         self.face_service = FaceService()
 
     def _notify_status(self, event, status: str):
-        """Notify MyClassAdmin without interrupting photo ingestion."""
+        """Notify MyClassAdmin with retries for temporary failures."""
 
         if not MYCLASSADMIN_STATUS_URL:
             print(
@@ -36,16 +38,13 @@ class IngestionService:
             )
             return
 
-        # MyClassAdmin requires its event ID as a positive integer.
         try:
             external_event_id = int(event.event_id)
-
             if external_event_id <= 0:
                 raise ValueError("Event ID must be positive.")
-
         except (TypeError, ValueError):
             print(
-                "Invalid MyClassAdmin event ID; callback skipped: "
+                "Invalid MyClassAdmin event ID: "
                 f"{event.event_id}"
             )
             return
@@ -73,27 +72,63 @@ class IngestionService:
             "status": callback_status,
         }
 
-        try:
-            response = requests.post(
-                MYCLASSADMIN_STATUS_URL,
-                json=payload,
-                headers=headers,
-                timeout=10,
-            )
-            response.raise_for_status()
+        retryable_status_codes = {429, 500, 502, 503, 504}
 
-            print(
-                "MyClassAdmin notified successfully: "
-                f"event_id={external_event_id}, "
-                f"status={callback_status}"
-            )
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    MYCLASSADMIN_STATUS_URL,
+                    json=payload,
+                    headers=headers,
+                    timeout=10,
+                )
+                response.raise_for_status()
 
-        except requests.RequestException as error:
-            print(
-                "MyClassAdmin status callback failed: "
-                f"event_id={external_event_id}, "
-                f"status={callback_status}, error={error}"
-            )
+                print(
+                    "MyClassAdmin notified successfully: "
+                    f"event_id={external_event_id}, "
+                    f"status={callback_status}"
+                )
+                return
+
+
+            except requests.RequestException as error:
+                response = getattr(error, "response", None)
+                status_code = (
+                    response.status_code
+                    if response is not None
+                    else None
+                )
+                response_body = (
+                    response.text[:1000]
+                    if response is not None
+                    else str(error)
+                )
+
+                print(
+                    "MyClassAdmin callback error | "
+                    f"event_id={external_event_id} | "
+                    f"status={callback_status} | "
+                    f"http_status={status_code} | "
+                    f"response={response_body}"
+                )
+
+                should_retry = (
+                    status_code is None
+                    or status_code in retryable_status_codes
+                )
+
+                if not should_retry or attempt == 2:
+                    print(
+                        "Callback delivery stopped after "
+                        f"{attempt + 1} attempt(s)."
+                    )
+                    return
+
+                delay = 2 ** attempt
+                print(f"Retrying callback in {delay}s...")
+                time.sleep(delay)
+
 
     def _set_status(self, event, status: str):
         """Persist status and notify MyClassAdmin only when it changes."""
@@ -139,7 +174,9 @@ class IngestionService:
         )
 
         if event is None:
-            raise ValueError(f"Event with ID {event_id} not found.")
+            raise ValueError(
+                f"Event with ID {event_id} not found."
+            )
 
         self._set_status(event, "Processing")
 
@@ -257,8 +294,6 @@ class IngestionService:
                         "Could not persist failure status: "
                         f"{status_error}"
                     )
-
-                    self._notify_status(event, "Failed")
 
             print(f"Critical ingestion error: {error}")
             raise

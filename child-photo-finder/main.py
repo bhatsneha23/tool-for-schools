@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.database import Base, engine
+from app import models
 from app.api.routes import router
 
 
@@ -9,7 +10,7 @@ app = FastAPI(
     description="Event-based child photo search using face recognition",
     version="1.0.0"
 )
-
+Base.metadata.create_all(bind=engine)
 
 # ============================================================
 # CORS CONFIGURATION

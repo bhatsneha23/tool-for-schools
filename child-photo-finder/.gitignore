@@ -22,3 +22,15 @@ data/uploads/
 # IDE
 .vscode/
 .idea/
+
+# Local database dumps
+*.dump
+*.sql
+
+# Local database and face data
+data/
+*.pkl
+*.joblib
+
+# Local logs
+*.log
