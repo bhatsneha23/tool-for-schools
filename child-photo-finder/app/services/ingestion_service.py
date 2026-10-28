@@ -100,7 +100,7 @@ class IngestionService:
                     else None
                 )
                 response_body = (
-                    response.text[:1000]
+                    response.text
                     if response is not None
                     else str(error)
                 )
