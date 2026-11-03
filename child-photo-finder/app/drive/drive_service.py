@@ -1,11 +1,11 @@
+
 import io
 import os
 import re
 
 import requests
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -15,53 +15,26 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly"
 ]
 
-
 BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")
 )
 
-
-CREDENTIALS_FILE = os.path.join(
+SERVICE_ACCOUNT_FILE = os.path.join(
     BASE_DIR,
     "credentials",
-    "google_credentials.json"
+    "service-account.json"
 )
 
 
-TOKEN_FILE = os.path.join(
-    BASE_DIR,
-    "credentials",
-    "token.json"
-)
+def get_drive_credentials():
+    return service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=SCOPES
+    )
 
 
 def get_drive_service():
-    credentials = None
-
-    # Reuse previously generated token
-    if os.path.exists(TOKEN_FILE):
-        credentials = Credentials.from_authorized_user_file(
-            TOKEN_FILE,
-            SCOPES
-        )
-
-    # Refresh expired token
-    if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
-
-    # First-time login
-    if not credentials or not credentials.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            CREDENTIALS_FILE,
-            SCOPES
-        )
-
-        credentials = flow.run_local_server(
-            port=0
-        )
-
-        with open(TOKEN_FILE, "w") as token:
-            token.write(credentials.to_json())
+    credentials = get_drive_credentials()
 
     return build(
         "drive",
@@ -92,9 +65,7 @@ def list_files_in_folder(folder_id):
             pageToken=page_token
         ).execute()
 
-        results.extend(
-            response.get("files", [])
-        )
+        results.extend(response.get("files", []))
 
         page_token = response.get("nextPageToken")
 
@@ -134,7 +105,7 @@ def download_file(file_id):
 def get_thumbnail_link(file_id):
     """
     Get the temporary Google Drive thumbnail URL
-    and request a larger thumbnail for better quality.
+    and request a larger thumbnail.
     """
     service = get_drive_service()
 
@@ -148,9 +119,6 @@ def get_thumbnail_link(file_id):
     if not thumbnail_link:
         return None
 
-    # Request a larger thumbnail.
-    # Google Drive thumbnail URLs commonly contain
-    # a size parameter such as =s220, =s400, etc.
     if "=s" in thumbnail_link:
         thumbnail_link = re.sub(
             r"=s\d+",
@@ -158,7 +126,6 @@ def get_thumbnail_link(file_id):
             thumbnail_link
         )
     else:
-        # Fallback if Google returns a URL without a size parameter.
         thumbnail_link += "=s800"
 
     return thumbnail_link
@@ -166,35 +133,16 @@ def get_thumbnail_link(file_id):
 
 def download_thumbnail(file_id):
     """
-    Download the thumbnail from Google Drive using
-    the authenticated Google credentials.
-
-    Returns:
-        BytesIO containing the thumbnail image.
+    Download thumbnail using Service Account credentials.
+    Returns BytesIO containing the thumbnail image.
     """
     thumbnail_link = get_thumbnail_link(file_id)
 
     if not thumbnail_link:
         return None
 
-    credentials = None
-
-    if os.path.exists(TOKEN_FILE):
-        credentials = Credentials.from_authorized_user_file(
-            TOKEN_FILE,
-            SCOPES
-        )
-
-    if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
-
-    if not credentials or not credentials.valid:
-        get_drive_service()
-
-        credentials = Credentials.from_authorized_user_file(
-            TOKEN_FILE,
-            SCOPES
-        )
+    credentials = get_drive_credentials()
+    credentials.refresh(Request())
 
     response = requests.get(
         thumbnail_link,
@@ -206,10 +154,7 @@ def download_thumbnail(file_id):
 
     response.raise_for_status()
 
-    thumbnail_data = io.BytesIO(
-        response.content
-    )
-
+    thumbnail_data = io.BytesIO(response.content)
     thumbnail_data.seek(0)
 
     return thumbnail_data
