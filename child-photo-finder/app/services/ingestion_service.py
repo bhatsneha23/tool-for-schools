@@ -190,15 +190,15 @@ class IngestionService:
             failed = 0
 
             if len(image_files) == 0:
-                self._set_status(event, "Pending")
-                print("No images found. Event remains Pending.")
+                self._set_status(event, "Ready")
+                print("No images found. Event is Ready with no photos.")
 
                 return {
                     "processed": 0,
                     "skipped": 0,
                     "failed": 0,
                     "total_faces": 0,
-                    "status": "Pending",
+                    "status": "Ready",
                 }
 
             for index, file in enumerate(image_files, start=1):

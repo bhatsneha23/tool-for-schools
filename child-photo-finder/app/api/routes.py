@@ -12,10 +12,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel , Field
 from sqlalchemy.orm import Session
 from io import BytesIO
+from urllib.parse import urlparse
 from app.models import Event, Photo, FaceEmbedding, IngestionJob
 from app.drive.drive_service import (
     download_file,
-    download_thumbnail
+    download_thumbnail,
+    validate_drive_folder_id,
 )
 
 from app.database import get_db
@@ -79,20 +81,42 @@ def extract_drive_folder_id(drive_link: str) -> str:
             detail="Google Drive link cannot be empty."
         )
 
+    parsed_link = urlparse(drive_link)
+
     # Standard Google Drive folder URL
-    if "/folders/" in drive_link:
-        folder_id = drive_link.split("/folders/")[1]
+    if "/folders/" in parsed_link.path:
+        if parsed_link.netloc.lower() not in {
+            "drive.google.com",
+            "docs.google.com",
+        }:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid Google Drive folder link."
+            )
+
+        folder_id = parsed_link.path.split("/folders/", 1)[1]
 
         # Remove query parameters if present
-        folder_id = folder_id.split("?")[0]
         folder_id = folder_id.split("/")[0]
 
         if folder_id:
-            return folder_id
+            try:
+                return validate_drive_folder_id(folder_id)
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(error),
+                ) from error
 
     # If a folder ID itself is provided
-    if "drive.google.com" not in drive_link:
-        return drive_link
+    if not parsed_link.scheme and not parsed_link.netloc:
+        try:
+            return validate_drive_folder_id(drive_link)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(error),
+            ) from error
 
     raise HTTPException(
         status_code=400,
@@ -236,7 +260,33 @@ def create_event(
 # DELETE EVENT
 # ============================================================
 
+@router.get("/events")
+def get_events(
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_api_key),
+):
+    """Return all events for the event-selection portal."""
 
+    events = (
+        db.query(Event)
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .all()
+    )
+
+    return {
+        "events": [
+            {
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "drive_link": (
+                    "https://drive.google.com/drive/folders/"
+                    f"{event.drive_folder_id}"
+                ),
+                "status": event.status,
+            }
+            for event in events
+        ]
+    }
 
 
 @router.delete("/events/{event_id}")

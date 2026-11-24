@@ -1,4 +1,3 @@
-
 import io
 import os
 import re
@@ -14,6 +13,7 @@ from googleapiclient.http import MediaIoBaseDownload
 SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly"
 ]
+DRIVE_FOLDER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..")
@@ -43,7 +43,22 @@ def get_drive_service():
     )
 
 
+def validate_drive_folder_id(folder_id):
+    """Return a safe Google Drive folder ID or raise ValueError."""
+
+    if not isinstance(folder_id, str):
+        raise ValueError("Google Drive folder ID must be text.")
+
+    folder_id = folder_id.strip()
+
+    if not DRIVE_FOLDER_ID_PATTERN.fullmatch(folder_id):
+        raise ValueError("Invalid Google Drive folder ID.")
+
+    return folder_id
+
+
 def list_files_in_folder(folder_id):
+    folder_id = validate_drive_folder_id(folder_id)
     service = get_drive_service()
 
     query = (
